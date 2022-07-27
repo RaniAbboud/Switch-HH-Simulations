@@ -34,6 +34,10 @@ if __name__ == '__main__':
         '6W-HashPipe': [HashPipeSketch(counters=counters, stages=6) for counters in counter_values]
     }
 
+    # Initializations
+    recall_by_type = {sketch_type: [0] * len(counter_values) for sketch_type in sketches_by_type.keys()}
+    mse_by_type = {sketch_type: [0] * len(counter_values) for sketch_type in sketches_by_type.keys()}
+
     for trial in range(number_of_trials):
         print(f'Performing trial#{trial + 1}...')
         # clean sketches
@@ -55,8 +59,6 @@ if __name__ == '__main__':
         # utils.insert_kaggle_data(all_sketches)
         print('Done filling sketches.')
 
-        recall_by_type = {sketch_type: [0] * len(counter_values) for sketch_type in sketches_by_type.keys()}
-        mse_by_type = {sketch_type: [0] * len(counter_values) for sketch_type in sketches_by_type.keys()}
         # calculating Recall and plotting
         for sketch_type, sketches in sketches_by_type.items():
             for i, sketch in enumerate(sketches):
@@ -89,7 +91,6 @@ if __name__ == '__main__':
         plt.plot(counter_values, [mse / number_of_trials for mse in mse_by_type[sketch_type]],
                  label=sketch_type)
 
-    plt.subplot(1, 2, gridspec_kw={'width_ratios': [5, 5]})
     plt.title(f'#trials={number_of_trials}', fontsize=10)
     # plt.suptitle(f'Top-{k}, zipf-a={zipf_a}', fontsize=18, y=0.98)
     plt.suptitle(f'Top-{k}', fontsize=18, y=0.98)
