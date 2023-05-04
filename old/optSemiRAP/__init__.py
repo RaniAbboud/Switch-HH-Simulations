@@ -16,6 +16,8 @@ class OptimizedSemiRapSketch:
         self.counters_per_stage = counters // stages
         self.data = [[None for _ in range(self.counters_per_stage)] for _ in range(stages)]
         self.hash = utils.generate_random_hash_function(random.randint(1, 256))
+        self.statistics = utils.Statistics()
+        self.counts = {}
 
     def insert(self, flow: Flow):
         for stage in range(self.stages):
@@ -71,4 +73,9 @@ class OptimizedSemiRapSketch:
         if hash_func_index is None:
             hash_func_index = random.randint(1, 256)
         self.hash = utils.generate_random_hash_function(hash_func_index)
+        self.statistics = utils.Statistics()
+        self.counts = {}
+
+
+
 
