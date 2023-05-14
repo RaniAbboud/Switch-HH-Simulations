@@ -1,20 +1,19 @@
-import math
-import random
-# import pandas as pd
-# from scipy.stats import zipf
 from collections import Counter
 from flow import Flow
 from dataclasses import dataclass
 from scapy.all import *
-
+from os import listdir
 
 _memomask = {}
 
-data = []
-
 theta = 1000
 
-preader = PcapReader('/Users/srani/Documents/roy/caida/equinix-chicago.dirA.20160121-125911.UTC.anon.pcap')
+caida_year = 18
+
+parsed_traces_directory = f'./parsed_traces/caida_{caida_year}/'
+
+data = []
+counter = Counter()
 
 
 @dataclass
@@ -54,47 +53,35 @@ def next_power_of_2(x):
     return 1 if x == 0 else 2 ** ((x - 1).bit_length())
 
 
-# def readCaidaData(k=32, offset=0, n=2 * 10 ** 6):
-#     global data
-#     with open('./data/caida_16_part1_parsed.txt') as file:
-#         data = file.readlines()[offset:offset + n]
-#     # print(Counter(data).most_common(128))
-#     true_top_k = [flow_id for (flow_id, _) in Counter(data).most_common(k)]
-#     true_top_k_counts = Counter(data).most_common(k)
-#     return data, true_top_k, true_top_k_counts
+def get_num_of_trace_files():
+    return len(listdir(parsed_traces_directory))
 
 
-def readCaidaDataV2(k=32, offset=0, n=2 * 10 ** 6):
+def load_data_file(file_index=0):
     global data
-    global preader
-    for _ in range(n):
-        p = next(preader)
-        if p is None:
-            print('PcapReader is empty.')
-            break
-        if IP not in p:
-            continue
-        flow_id = make_key(p)
-        data.append(flow_id)
-    # true_top_k = [flow_id for (flow_id, _) in Counter(data).most_common(k)]
-    # true_top_k_counts = Counter(data).most_common(k)
-    # return data, true_top_k, true_top_k_counts
-    return data
+    global counter
+    if data != []:
+        counter += Counter(data)  # if this is not the first data file, save counts into the global counter
+    parsed_trace_file_path = sorted(listdir(parsed_traces_directory))[file_index]
+    with open(parsed_traces_directory + parsed_trace_file_path) as file:
+        data = [line.rstrip() for line in file]
 
 
-def insert_data_to_sketch(sketch, calculate_statistics=True, stats_skip_count=100000):
-    global data
-    counter = Counter()
+def insert_data_to_sketch(sketch, stats_skip_count):
+    global counter
+    global counter_total
+    local_counter = Counter()
     for index, flow_id in enumerate(data):
         flow_id = str(flow_id)
         flow = Flow(flow_id)
-        counter[flow_id] += 1
+        local_counter[flow_id] += 1
         # insert into sketch
         frequency_estimation, hh_label = sketch.insert(flow)
-        if calculate_statistics and index >= stats_skip_count:
+        if counter or index >= stats_skip_count:  # if this is not the first data file OR already inserted 1M
+            real_count = counter[flow.id] + local_counter[flow.id]
             # calculate estimation error
-            sketch.statistics.mse += (counter[flow_id] - frequency_estimation) ** 2
-            if counter[flow.id] >= (index + 1) // theta:  # Flow is HH
+            sketch.statistics.mse += (real_count - frequency_estimation) ** 2
+            if real_count >= sketch.pkt_count // theta:  # Flow is HH
                 if hh_label:
                     # correctly identified as HH
                     sketch.statistics.tp += 1
@@ -110,8 +97,8 @@ def insert_data_to_sketch(sketch, calculate_statistics=True, stats_skip_count=10
                     sketch.statistics.tn += 1
 
 
-def insert_data(sketches, calculate_statistics=True, stats_skip_count=100000):
-    threads = [threading.Thread(target=insert_data_to_sketch, args=(sketch, calculate_statistics, stats_skip_count))
+def insert_data(sketches, stats_skip_count):
+    threads = [threading.Thread(target=insert_data_to_sketch, args=(sketch, stats_skip_count))
                for sketch in sketches]
     # start threads
     for t in threads:
@@ -123,12 +110,3 @@ def insert_data(sketches, calculate_statistics=True, stats_skip_count=100000):
 
 def kb_formatter(val, pos):
     return f'{int(val // 1024)}KB'
-
-
-def make_key(packet):
-    key = f'{packet[IP].src},{packet[IP].dst},{packet[IP].proto}'
-    if TCP in packet:
-        key = f'{key},{packet[TCP].sport},{packet[TCP].dport}'
-    elif UDP in packet:
-        key = f'{key},{packet[UDP].sport},{packet[UDP].dport}'
-    return key
