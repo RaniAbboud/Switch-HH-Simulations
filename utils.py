@@ -8,7 +8,7 @@ _memomask = {}
 
 theta = 1000
 
-caida_year = 18
+caida_year = 19
 
 parsed_traces_directory = f'./parsed_traces/caida_{caida_year}/'
 

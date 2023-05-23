@@ -1,12 +1,16 @@
+import json
 import math
 import statistics
 
 import utils
+from fcm import FCMSketch
 from hashpipe import HashPipeSketch
 from cmsis import CMSIS
 from precision import PrecisionSketch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+
+stats_directory = "./statistics/"
 
 if __name__ == '__main__':
     utils.theta = 2000
@@ -19,9 +23,9 @@ if __name__ == '__main__':
         'CMS': [CMSIS(memory_bytes=mem, entries_per_id_stage=0, id_stages=0, required_matches=0, insertion_p=0, theta=utils.theta) for mem in memory_values_bytes],
         'CMSIS-M1': [CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=1, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
         'CMSIS-M2': [CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=2, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
-        '2W-PRECISION': [PrecisionSketch(memory_bytes=mem, stages=2, delay=20, theta=utils.theta) for mem in memory_values_bytes],
-        '2W-HashPipe': [HashPipeSketch(memory_bytes=mem, stages=2, theta=utils.theta) for mem in memory_values_bytes],
-        # '4W-HashPipe': [HashPipeSketch(memory_bytes=mem, stages=4) for mem in memory_values_bytes],
+        'PRECISION': [PrecisionSketch(memory_bytes=mem, stages=2, delay=20, theta=utils.theta) for mem in memory_values_bytes],
+        'HashPipe': [HashPipeSketch(memory_bytes=mem, stages=2, theta=utils.theta) for mem in memory_values_bytes],
+        'FCM-Sketch': [FCMSketch(memory_bytes=mem, theta=utils.theta, n_trees=2, k=8, stages=3) for mem in memory_values_bytes]
     }
 
     # Initializations
@@ -31,6 +35,7 @@ if __name__ == '__main__':
     fpr_by_type = {sketch_type: [[] for i in range(len(memory_values_bytes))] for sketch_type in sketches_by_type.keys()}
     fnr_by_type = {sketch_type: [[] for i in range(len(memory_values_bytes))] for sketch_type in sketches_by_type.keys()}
 
+
     for trial in range(number_of_trials):
         print(f'Performing trial#{trial + 1}...')
         for trace_index in range(utils.get_num_of_trace_files()):
@@ -39,7 +44,7 @@ if __name__ == '__main__':
             all_sketches = [sketch for (_, sketches) in sketches_by_type.items() for sketch in sketches]
             # fill sketches
             utils.insert_data(sketches=all_sketches, stats_skip_count=trace_prefix_skip_stats_size)
-            print('Done filling sketches.')
+        print('Done filling sketches.')
         # calculating Recall and MSE
         for sketch_type, sketches in sketches_by_type.items():
             for i, sketch in enumerate(sketches):
@@ -65,6 +70,16 @@ if __name__ == '__main__':
             for sketch in sketches_by_type[sketch_type]:
                 sketch.reset(hash_func_index=trial)
         utils.counter.clear()
+
+    with open(f"{stats_directory}caida{utils.caida_year}_th{utils.theta//1000}k_new.json", "w") as stats_file:
+        stats = {
+            "recall": recall_by_type,
+            "precision": precision_by_type,
+            "mse": mse_by_type,
+            "fnr": fnr_by_type,
+            "fpr": fpr_by_type
+        }
+        json.dump(stats, stats_file, indent=4)
 
     # Plotting
     # plotting average recall for each sketch
@@ -118,4 +133,5 @@ if __name__ == '__main__':
     plt.suptitle(rf"CAIDA-{utils.caida_year}, $\theta$={1/utils.theta}", fontsize=18, y=0.98)
     plt.figlegend([sketch_name for sketch_name in sketches_by_type.keys()], loc="lower right")
     plt.tight_layout()
-    plt.show(block=True)
+    plt.savefig(f'caida{utils.caida_year}_100m_th{utils.theta//1000}k.png')
+    # plt.show(block=True)
