@@ -4,6 +4,7 @@ import statistics
 
 import utils
 from fcm import FCMSketch
+from fcm_topk import FCMTopK
 from hashpipe import HashPipeSketch
 from cmsis import CMSIS
 from precision import PrecisionSketch
@@ -13,19 +14,39 @@ from matplotlib.ticker import FuncFormatter
 stats_directory = "./statistics/"
 
 if __name__ == '__main__':
-    utils.theta = 2000
+    utils.theta = 1000
     number_of_trials = 1
     # trial_size = 2 * 10 ** 6
     trace_prefix_skip_stats_size = 1 * 10 ** 6
 
     memory_values_bytes = [16 * 1024 * (2 ** i) for i in range(7)]
     sketches_by_type = {
-        'CMS': [CMSIS(memory_bytes=mem, entries_per_id_stage=0, id_stages=0, required_matches=0, insertion_p=0, theta=utils.theta) for mem in memory_values_bytes],
-        'CMSIS-M1': [CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=1, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
-        'CMSIS-M2': [CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=2, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
-        'PRECISION': [PrecisionSketch(memory_bytes=mem, stages=2, delay=20, theta=utils.theta) for mem in memory_values_bytes],
-        'HashPipe': [HashPipeSketch(memory_bytes=mem, stages=2, theta=utils.theta) for mem in memory_values_bytes],
-        'FCM-Sketch': [FCMSketch(memory_bytes=mem, theta=utils.theta, n_trees=2, k=8, stages=3) for mem in memory_values_bytes]
+        'FCM+TopK': [FCMTopK(memory_bytes=mem, theta=utils.theta) for mem in memory_values_bytes]
+        # 'CMSIS-M1(64)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=64, id_stages=3, required_matches=1, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M1(128)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=128, id_stages=3, required_matches=1, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M1(256)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=1, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M2(64)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=64, id_stages=3, required_matches=2, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M2(128)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=128, id_stages=3, required_matches=2, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M2(256)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=2, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes]
+
+        # 'CMS': [CMSIS(memory_bytes=mem, entries_per_id_stage=0, id_stages=0, required_matches=0, insertion_p=0, theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M1': [CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=1, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M2': [CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=2, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
+        # 'PRECISION': [PrecisionSketch(memory_bytes=mem, stages=2, delay=20, theta=utils.theta) for mem in memory_values_bytes],
+        # 'HashPipe': [HashPipeSketch(memory_bytes=mem, stages=2, theta=utils.theta) for mem in memory_values_bytes],
+        # 'FCM-Sketch': [FCMSketch(memory_bytes=mem, theta=utils.theta, n_trees=2, k=8, stages=3) for mem in memory_values_bytes]
     }
 
     # Initializations
@@ -35,10 +56,10 @@ if __name__ == '__main__':
     fpr_by_type = {sketch_type: [[] for i in range(len(memory_values_bytes))] for sketch_type in sketches_by_type.keys()}
     fnr_by_type = {sketch_type: [[] for i in range(len(memory_values_bytes))] for sketch_type in sketches_by_type.keys()}
 
-
     for trial in range(number_of_trials):
         print(f'Performing trial#{trial + 1}...')
         for trace_index in range(utils.get_num_of_trace_files()):
+        # for trace_index in range(1):
             print(f'Inserting trace#{trace_index}...')
             utils.load_data_file(trace_index)  # load the parsed data file (~22M 5-tuples) into memory
             all_sketches = [sketch for (_, sketches) in sketches_by_type.items() for sketch in sketches]
@@ -71,7 +92,7 @@ if __name__ == '__main__':
                 sketch.reset(hash_func_index=trial)
         utils.counter.clear()
 
-    with open(f"{stats_directory}caida{utils.caida_year}_th{utils.theta//1000}k_new.json", "w") as stats_file:
+    with open(f"{stats_directory}caida{utils.caida_year}_th{utils.theta//1000}k_fcm-topk.json", "w") as stats_file:
         stats = {
             "recall": recall_by_type,
             "precision": precision_by_type,
@@ -133,5 +154,5 @@ if __name__ == '__main__':
     plt.suptitle(rf"CAIDA-{utils.caida_year}, $\theta$={1/utils.theta}", fontsize=18, y=0.98)
     plt.figlegend([sketch_name for sketch_name in sketches_by_type.keys()], loc="lower right")
     plt.tight_layout()
-    plt.savefig(f'caida{utils.caida_year}_100m_th{utils.theta//1000}k.png')
+    plt.savefig(f'caida{utils.caida_year}_100m_th{utils.theta//1000}k_fcm-topk.png')
     # plt.show(block=True)

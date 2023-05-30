@@ -19,8 +19,8 @@ class FCMSketch:
         self.statistics = utils.Statistics()
         self.pkt_count = 0
 
-    def insert(self, flow: Flow):
-        self.pkt_count += 1
+    def insert(self, flow: Flow, num_insertions=1):
+        self.pkt_count += num_insertions
         # CMS Update
         estimations = []
         for tree in range(self.n_trees):
@@ -31,7 +31,7 @@ class FCMSketch:
                 if self.data[tree][stage][index] >= overflow_val:
                     counters.append(self.data[tree][stage][index])
                     continue
-                self.data[tree][stage][index] += 1
+                self.data[tree][stage][index] += num_insertions
                 counters.append(self.data[tree][stage][index])
                 break  # did not reach overflow, not continuing to next stage
             estimations.append(sum(counters))

@@ -8,7 +8,7 @@ _memomask = {}
 
 theta = 1000
 
-caida_year = 19
+caida_year = 18
 
 parsed_traces_directory = f'./parsed_traces/caida_{caida_year}/'
 
@@ -67,9 +67,8 @@ def load_data_file(file_index=0):
         data = [line.rstrip() for line in file]
 
 
-def insert_data_to_sketch(sketch, stats_skip_count):
+def insert_data_to_sketch(sketch, stats_skip_count, calculate_online_stats=True):
     global counter
-    global counter_total
     local_counter = Counter()
     for index, flow_id in enumerate(data):
         flow_id = str(flow_id)
@@ -77,28 +76,29 @@ def insert_data_to_sketch(sketch, stats_skip_count):
         local_counter[flow_id] += 1
         # insert into sketch
         frequency_estimation, hh_label = sketch.insert(flow)
-        if counter or index >= stats_skip_count:  # if this is not the first data file OR already inserted 1M
-            real_count = counter[flow.id] + local_counter[flow.id]
-            # calculate estimation error
-            sketch.statistics.mse += (real_count - frequency_estimation) ** 2
-            if real_count >= sketch.pkt_count // theta:  # Flow is HH
-                if hh_label:
-                    # correctly identified as HH
-                    sketch.statistics.tp += 1
-                else:
-                    # missed HH
-                    sketch.statistics.fn += 1
-            else:  # Flow is NOT a HH
-                if hh_label:
-                    # wrongly identified as HH
-                    sketch.statistics.fp += 1
-                else:
-                    # correctly identified as NON HH
-                    sketch.statistics.tn += 1
+        if calculate_online_stats:
+            if counter or index >= stats_skip_count:  # if this is not the first data file OR already inserted 1M
+                real_count = counter[flow.id] + local_counter[flow.id]
+                # calculate estimation error
+                sketch.statistics.mse += (real_count - frequency_estimation) ** 2
+                if real_count >= sketch.pkt_count // theta:  # Flow is HH
+                    if hh_label:
+                        # correctly identified as HH
+                        sketch.statistics.tp += 1
+                    else:
+                        # missed HH
+                        sketch.statistics.fn += 1
+                else:  # Flow is NOT a HH
+                    if hh_label:
+                        # wrongly identified as HH
+                        sketch.statistics.fp += 1
+                    else:
+                        # correctly identified as NON HH
+                        sketch.statistics.tn += 1
 
 
-def insert_data(sketches, stats_skip_count):
-    threads = [threading.Thread(target=insert_data_to_sketch, args=(sketch, stats_skip_count))
+def insert_data(sketches, stats_skip_count=0, calculate_online_stats=True):
+    threads = [threading.Thread(target=insert_data_to_sketch, args=(sketch, stats_skip_count, calculate_online_stats))
                for sketch in sketches]
     # start threads
     for t in threads:
