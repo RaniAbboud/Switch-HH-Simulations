@@ -57,6 +57,7 @@ class FCMTopK:
         top = {}
         for heavy_row in self.heavy_structure:
             top[heavy_row.heavy_id] = heavy_row.heavy_counter
+        return top
 
     def get_count(self, flow_id: str):
         # try heavy structure first

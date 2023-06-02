@@ -14,13 +14,13 @@ from matplotlib.ticker import FuncFormatter
 stats_directory = "./statistics/"
 
 if __name__ == '__main__':
-    utils.theta = 1000
-    number_of_trials = 5
-    trial_size = 10 * 10 ** 6
+    utils.theta = 2000
+    number_of_trials = 3
+    trial_size = 20 * 10 ** 6
 
     memory_values_bytes = [16 * 1024 * (2 ** i) for i in range(7)]
     sketches_by_type = {
-        'CMSIS': [CMSIS(memory_bytes=mem, entries_per_id_stage=128, id_stages=3, required_matches=1, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
+        'CMSIS': [CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=1, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
         'PRECISION': [PrecisionSketch(memory_bytes=mem, stages=2, delay=20, theta=utils.theta) for mem in memory_values_bytes],
         'HashPipe': [HashPipeSketch(memory_bytes=mem, stages=2, theta=utils.theta) for mem in memory_values_bytes],
         'FCM+TopK': [FCMTopK(memory_bytes=mem, theta=utils.theta) for mem in memory_values_bytes]
@@ -32,11 +32,9 @@ if __name__ == '__main__':
     for trial in range(number_of_trials):
         print(f'Performing trial#{trial + 1}...')
 
-        # load 20M from each file, 10M in each trial
-        utils.load_data_file(trial//2)
+        # load {trial_size} from each file
+        utils.load_data_file(trial)
         utils.data = utils.data[:trial_size]
-        if trial % 2 != 0:
-            utils.data = utils.data[trial_size:trial_size*2]
 
         all_sketches = [sketch for (_, sketches) in sketches_by_type.items() for sketch in sketches]
         # fill sketches
@@ -44,11 +42,12 @@ if __name__ == '__main__':
         print('Done filling sketches.')
         # calculating Recall and MSE
         counter = Counter(utils.data)
-        top_flows = {flow: count for flow, count in counter.items() if count >= trial_size//utils.theta}
+        threshold = trial_size//utils.theta
+        top_flows = {flow: count for flow, count in counter.items() if count >= threshold}
         for sketch_type, sketches in sketches_by_type.items():
             for i, sketch in enumerate(sketches):
                 # Offline Recall
-                estimated_top_flows = sketch.get_counts().keys()
+                estimated_top_flows = [f for (f, c) in sketch.get_counts().items() if c >= threshold]
                 recall = len([flow for flow in estimated_top_flows if flow in top_flows])/len(top_flows)
                 recall_by_type[sketch_type][i].append(recall)
                 print(f"{sketch_type} with {utils.kb_formatter(memory_values_bytes[i],None)} memory. Recall=", recall)
@@ -58,7 +57,7 @@ if __name__ == '__main__':
                 sketch.reset(hash_func_index=trial)
         utils.counter.clear()
 
-    with open(f"{stats_directory}caida{utils.caida_year}_th{utils.theta//1000}k_offline.json", "w") as stats_file:
+    with open(f"{stats_directory}caida{utils.caida_year}_{trial_size//(10**6)}m_th{utils.theta//1000}k_offline.json", "w") as stats_file:
         stats = {
             "recall": recall_by_type
         }
@@ -76,5 +75,5 @@ if __name__ == '__main__':
     plt.suptitle(rf"CAIDA-{utils.caida_year}, $\theta$={1/utils.theta}", fontsize=18, y=0.98)
     plt.figlegend([sketch_name for sketch_name in sketches_by_type.keys()], loc="lower right")
     plt.tight_layout()
-    plt.savefig(f'caida{utils.caida_year}_th{utils.theta//1000}k_offline.png')
+    plt.savefig(f'caida{utils.caida_year}_{trial_size//(10**6)}m_th{utils.theta//1000}k_offline.png')
     # plt.show(block=True)

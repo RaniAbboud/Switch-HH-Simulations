@@ -68,16 +68,13 @@ class CMSIS:
         # concatenating stage# to simulate per-stage hash function
 
     def get_counts(self):
-        threshold = self.pkt_count // self.theta
         top = {}
         for stage in range(self.id_stages):
             for flow_id in self.id_structure[stage]:
                 if flow_id in top or flow_id is None:
                     continue
-                # if self.count_id_matches(flow_id) >= self.required_matches:  # require {self.required_matches} appearances
                 estimation = self.get_count(flow_id)
-                if estimation >= threshold:  # require {self.required_matches} appearances
-                    top[flow_id] = estimation
+                top[flow_id] = estimation
         return top
 
     def get_count(self, flow_id: str):
