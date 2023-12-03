@@ -1,12 +1,37 @@
-import random
-import pandas as pd
-from scipy.stats import zipf
 from collections import Counter
 from flow import Flow
+from dataclasses import dataclass
+from scapy.all import *
+from os import listdir
 
 _memomask = {}
 
-data = {}
+theta = 1000
+
+caida_year = 18
+
+parsed_traces_directory = f'./parsed_traces/caida_{caida_year}/'
+
+data = []
+counter = Counter()
+
+
+@dataclass
+class Statistics:
+    def __init__(self):
+        self.mse = float(0)
+        self.fn = 0
+        self.tp = 0
+        self.fp = 0
+        self.tn = 0
+
+    def reset(self):
+        self.mse = float(0)
+        self.fn = 0
+        self.tp = 0
+        self.fp = 0
+        self.tn = 0
+
 
 def generate_random_hash_function(n):
     suffix = _memomask.get(n)
@@ -25,53 +50,63 @@ def flip_coin(p):
 
 
 def next_power_of_2(x):
-    return 1 if x == 0 else 2**(x - 1).bit_length()
+    return 1 if x == 0 else 2 ** ((x - 1).bit_length())
 
 
-def generateZipfData(k=32, a=1.1, n=10**6):
+def get_num_of_trace_files():
+    return len(listdir(parsed_traces_directory))
+
+
+def load_data_file(file_index=0):
     global data
-    data = zipf.rvs(a, size=n)
-    true_top_k = [str(flow_id) for (flow_id, _) in Counter(data).most_common(k)]
-    true_top_k_counts = Counter(data).most_common(k)
-    return data, true_top_k, true_top_k_counts
+    global counter
+    if data != []:
+        counter += Counter(data)  # if this is not the first data file, save counts into the global counter
+    parsed_trace_file_path = sorted(listdir(parsed_traces_directory))[file_index]
+    with open(parsed_traces_directory + parsed_trace_file_path) as file:
+        data = [line.rstrip() for line in file]
 
 
-def readKaggleData(k=128):
-    global data
-    df = pd.read_csv('./data/dataset.csv', usecols=['Source.IP', 'Destination.IP'])
-    data = df
-    print('Done reading Kaggle csv file.')
-    true_hit_counts = df.groupby(['Source.IP', 'Destination.IP']).size().reset_index(name='count').sort_values(
-        by='count',
-        ascending=False)[:k]
-    true_hit_counts = {row['Source.IP'] + ":" + row['Destination.IP']: row['count'] for _, row in
-                       true_hit_counts.iterrows()}
-    true_top_k = [flow_id for (flow_id, _) in true_hit_counts.items()]
+def insert_data_to_sketch(sketch, stats_skip_count, calculate_online_stats=True):
+    global counter
+    local_counter = Counter()
+    for index, flow_id in enumerate(data):
+        flow_id = str(flow_id)
+        flow = Flow(flow_id)
+        local_counter[flow_id] += 1
+        # insert into sketch
+        frequency_estimation, hh_label = sketch.insert(flow)
+        if calculate_online_stats:
+            if counter or index >= stats_skip_count:  # if this is not the first data file OR already inserted 1M
+                real_count = counter[flow.id] + local_counter[flow.id]
+                # calculate estimation error
+                sketch.statistics.mse += (real_count - frequency_estimation) ** 2
+                if real_count >= sketch.pkt_count // theta:  # Flow is HH
+                    if hh_label:
+                        # correctly identified as HH
+                        sketch.statistics.tp += 1
+                    else:
+                        # missed HH
+                        sketch.statistics.fn += 1
+                else:  # Flow is NOT a HH
+                    if hh_label:
+                        # wrongly identified as HH
+                        sketch.statistics.fp += 1
+                    else:
+                        # correctly identified as NON HH
+                        sketch.statistics.tn += 1
 
-    return df, true_top_k
+
+def insert_data(sketches, stats_skip_count=0, calculate_online_stats=True):
+    threads = [threading.Thread(target=insert_data_to_sketch, args=(sketch, stats_skip_count, calculate_online_stats))
+               for sketch in sketches]
+    # start threads
+    for t in threads:
+        t.start()
+    # wait for all threads to finish
+    for t in threads:
+        t.join()
 
 
-def readCaidaData(k=32, offset=0, n=2*10**6):
-    global data
-    with open('./data/caida_16_part1_parsed.txt') as file:
-        data = file.readlines()[offset:offset+n]
-    true_top_k = [flow_id for (flow_id, _) in Counter(data).most_common(k)]
-    true_top_k_counts = Counter(data).most_common(k)
-    return data, true_top_k, true_top_k_counts
-
-
-def insert_kaggle_data(sketches):
-    for _, row in data.iterrows():
-        flow = Flow(row['Source.IP'] + ":" + row['Destination.IP'])
-        for sketch in sketches:
-            sketch.insert(flow)
-
-
-# insert_zipf_data: inserts the zipf data into the given sketches.
-# Note that we could shuffle the data here, but instead we generate an entirely new zipf data for each trial
-# that we perform.
-def insert_zipf_data(sketches):
-    for flow_id in data:
-        flow = Flow(str(flow_id))
-        for sketch in sketches:
-            sketch.insert(flow)
+def kb_formatter(val, pos):
+    return f'{int(val // 1024)}KB'

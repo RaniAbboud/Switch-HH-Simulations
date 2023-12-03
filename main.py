@@ -1,99 +1,156 @@
-# Data taken from https://www.kaggle.com/datasets/jsrojas/ip-network-traffic-flows-labeled-with-87-apps
+import json
 import math
+import statistics
 
 import utils
+from fcm import FCMSketch
+from fcm_topk import FCMTopK
 from hashpipe import HashPipeSketch
-from optSemiRAP import OptimizedSemiRapSketch
+from cmsis import CMSIS
 from precision import PrecisionSketch
-from rap import RapSketch
-from semiRAP import SemiRapSketch
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+
+stats_directory = "./statistics/"
 
 if __name__ == '__main__':
-    k = 32  # as in top-k
-    # zipf_a = 2
-    number_of_trials = 5
+    utils.theta = 1000
+    number_of_trials = 1
+    trace_prefix_skip_stats_size = 1 * 10 ** 6
 
-    # read kaggle data
-    # df, true_top_k = utils.readKaggleData(k)
-
-    counter_values = [k * (2 ** i) for i in range(7)]
+    memory_values_bytes = [16 * 1024 * (2 ** i) for i in range(7)]
     sketches_by_type = {
-        '2W-SemiRAP (2-Apx)': [SemiRapSketch(counters=counters, stages=2) for counters in counter_values],
-        # '4W-SemiRAP': [SemiRapSketch(counters=counters, stages=4) for counters in counter_values],
-        # '6W-SemiRAP': [SemiRapSketch(counters=counters, stages=6) for counters in counter_values],
-        # '2W-StableHashPipe': [OptimizedSemiRapSketch(counters=counters, stages=2) for counters in counter_values],
-        # '4W-StableHashPipe': [OptimizedSemiRapSketch(counters=counters, stages=4) for counters in counter_values],
-        # '6W-StableHashPipe': [OptimizedSemiRapSketch(counters=counters, stages=6) for counters in counter_values],
-        # 'RAP': [RapSketch(counters=counters) for counters in counter_values],
-        '2W-PRECISION (2-Apx)': [PrecisionSketch(counters=counters, stages=2) for counters in counter_values],
-        # '4W-PRECISION': [PrecisionSketch(counters=counters, stages=4) for counters in counter_values],
-        # '8W-PRECISION': [PrecisionSketch(counters=counters, stages=8) for counters in counter_values],
-        '2W-HashPipe': [HashPipeSketch(counters=counters, stages=2) for counters in counter_values],
-        '4W-HashPipe': [HashPipeSketch(counters=counters, stages=4) for counters in counter_values],
-        '6W-HashPipe': [HashPipeSketch(counters=counters, stages=6) for counters in counter_values]
+        'CMS': [CMSIS(memory_bytes=mem, entries_per_id_stage=0, id_stages=0, required_matches=0, insertion_p=0, theta=utils.theta) for mem in memory_values_bytes],
+        'CMSIS-M1': [CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=1, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
+        'CMSIS-M2': [CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=2, insertion_p=1/128, theta=utils.theta) for mem in memory_values_bytes],
+        'PRECISION': [PrecisionSketch(memory_bytes=mem, stages=2, delay=20, theta=utils.theta) for mem in memory_values_bytes],
+        'HashPipe': [HashPipeSketch(memory_bytes=mem, stages=2, theta=utils.theta) for mem in memory_values_bytes],
+        'FCM-Sketch': [FCMSketch(memory_bytes=mem, theta=utils.theta, n_trees=2, k=8, stages=3) for mem in memory_values_bytes],
+        'FCM+TopK': [FCMTopK(memory_bytes=mem, theta=utils.theta) for mem in memory_values_bytes]
+        # 'CMSIS-M1(64)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=64, id_stages=3, required_matches=1, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M1(128)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=128, id_stages=3, required_matches=1, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M1(256)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=1, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M2(64)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=64, id_stages=3, required_matches=2, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M2(128)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=128, id_stages=3, required_matches=2, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes],
+        # 'CMSIS-M2(256)': [
+        #     CMSIS(memory_bytes=mem, entries_per_id_stage=256, id_stages=3, required_matches=2, insertion_p=1 / 128,
+        #           theta=utils.theta) for mem in memory_values_bytes]
     }
 
     # Initializations
-    recall_by_type = {sketch_type: [0] * len(counter_values) for sketch_type in sketches_by_type.keys()}
-    mse_by_type = {sketch_type: [0] * len(counter_values) for sketch_type in sketches_by_type.keys()}
+    recall_by_type = {sketch_type: [[] for i in range(len(memory_values_bytes))] for sketch_type in sketches_by_type.keys()}
+    precision_by_type = {sketch_type: [[] for i in range(len(memory_values_bytes))] for sketch_type in sketches_by_type.keys()}
+    mse_by_type = {sketch_type: [[] for i in range(len(memory_values_bytes))] for sketch_type in sketches_by_type.keys()}
+    fpr_by_type = {sketch_type: [[] for i in range(len(memory_values_bytes))] for sketch_type in sketches_by_type.keys()}
+    fnr_by_type = {sketch_type: [[] for i in range(len(memory_values_bytes))] for sketch_type in sketches_by_type.keys()}
 
     for trial in range(number_of_trials):
         print(f'Performing trial#{trial + 1}...')
+        for trace_index in range(utils.get_num_of_trace_files()):
+        # for trace_index in range(1):
+            print(f'Inserting trace#{trace_index}...')
+            utils.load_data_file(trace_index)  # load the parsed data file (~22M 5-tuples) into memory
+            all_sketches = [sketch for (_, sketches) in sketches_by_type.items() for sketch in sketches]
+            # fill sketches
+            utils.insert_data(sketches=all_sketches, stats_skip_count=trace_prefix_skip_stats_size)
+        print('Done filling sketches.')
+        # calculating Recall and MSE
+        for sketch_type, sketches in sketches_by_type.items():
+            for i, sketch in enumerate(sketches):
+                stats = sketch.statistics
+                # MSE
+                mse = stats.mse/sketch.pkt_count
+                mse_by_type[sketch_type][i].append(mse)
+                # Recall
+                recall = stats.tp/(stats.tp + stats.fn)
+                recall_by_type[sketch_type][i].append(recall)
+                # Precision
+                precision = stats.tp/(stats.tp + stats.fp)
+                precision_by_type[sketch_type][i].append(precision)
+                # FPR
+                fpr = stats.fp/(stats.fp + stats.tp)
+                fpr_by_type[sketch_type][i].append(fpr)
+                # FNR
+                fnr = stats.fn/(stats.fn + stats.tn)
+                fnr_by_type[sketch_type][i].append(fnr)
+                print(f"{sketch_type} with {utils.kb_formatter(memory_values_bytes[i],None)} memory. Recall=", recall, f' MSE=10^{math.log10(mse)}')
         # clean sketches
         for sketch_type in sketches_by_type.keys():
             for sketch in sketches_by_type[sketch_type]:
                 sketch.reset(hash_func_index=trial)
-        all_sketches = [sketch for (_, sketches) in sketches_by_type.items() for sketch in sketches]
+        utils.counter.clear()
 
-        # generate zipf data
-        # data, true_top_k = utils.generateZipfData(k, zipf_a, 3 * 10 ** 6)
-
-        # read CAIDA data
-        trial_size = 2*10**6
-        # data, true_top_k = utils.readCaidaData(k, offset=trial*trial_size, n=trial_size)
-        data, true_top_k, true_top_k_counts = utils.readCaidaData(k, offset=trial*trial_size, n=trial_size)
-
-        # fill sketches
-        utils.insert_zipf_data(all_sketches)
-        # utils.insert_kaggle_data(all_sketches)
-        print('Done filling sketches.')
-
-        # calculating Recall and plotting
-        for sketch_type, sketches in sketches_by_type.items():
-            for i, sketch in enumerate(sketches):
-                estimated_counts = sketch.get_counts()
-                estimated_top_hitters = sketch.get_counts().keys()
-                recall = sum([top_hitter in estimated_top_hitters for top_hitter in true_top_k]) / k
-                recall_by_type[sketch_type][i] += recall
-                mse = sum([(estimated_counts[flow]-flow_count)**2 if flow in estimated_counts
-                           else flow_count**2
-                           for (flow, flow_count) in true_top_k_counts])/k
-                mse_by_type[sketch_type][i] += mse
-                print(f"{sketch_type} with {counter_values[i]} counters. Recall=", recall, f' MSE=10^{math.log10(mse)}')
+    with open(f"{stats_directory}caida{utils.caida_year}_th{utils.theta//1000}k_fcm-topk.json", "w") as stats_file:
+        stats = {
+            "recall": recall_by_type,
+            "precision": precision_by_type,
+            "mse": mse_by_type,
+            "fnr": fnr_by_type,
+            "fpr": fpr_by_type
+        }
+        json.dump(stats, stats_file, indent=4)
 
     # Plotting
     # plotting average recall for each sketch
-    plt.subplot(1, 2, 1)
-    plt.xlabel('Number of counters')
+    plt.subplot(3, 2, 1)  # rows, cols, current number
+    plt.xlabel('Memory')
     plt.xscale('log', base=2)
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(utils.kb_formatter))
     plt.ylabel('Recall')
     for sketch_type in sketches_by_type.keys():
-        plt.plot(counter_values, [recall / number_of_trials for recall in recall_by_type[sketch_type]],
+        plt.plot(memory_values_bytes, [statistics.fmean(recall_list) for recall_list in recall_by_type[sketch_type]],
                  label=sketch_type)
-    # plotting average MSE (for top-k flows) for each sketch
-    plt.subplot(1, 2, 2)
-    plt.xlabel('Number of counters')
+    # plotting average Precision for each sketch
+    plt.subplot(3, 2, 2)
+    plt.xlabel('Memory')
     plt.xscale('log', base=2)
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(utils.kb_formatter))
+    plt.ylabel('Precision')
+    for sketch_type in sketches_by_type.keys():
+        plt.plot(memory_values_bytes, [statistics.fmean(precision_list) for precision_list in precision_by_type[sketch_type]],
+                 label=sketch_type)
+    # plt.title(f'#trials={number_of_trials}, theta={utils.theta}', fontsize=10)
+    # plotting average false-positives rate for each sketch
+    plt.subplot(3, 2, 3)
+    plt.xlabel('Memory')
+    plt.xscale('log', base=2)
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(utils.kb_formatter))
+    plt.ylabel('FPR')
+    for sketch_type in sketches_by_type.keys():
+        plt.plot(memory_values_bytes, [statistics.fmean(fp_list) for fp_list in fpr_by_type[sketch_type]],
+                 label=sketch_type)
+    # plotting average false-negative rate for each sketch
+    plt.subplot(3, 2, 4)
+    plt.xlabel('Memory')
+    plt.xscale('log', base=2)
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(utils.kb_formatter))
+    plt.ylabel('FNR')
+    for sketch_type in sketches_by_type.keys():
+        plt.plot(memory_values_bytes, [statistics.fmean(fn_list) for fn_list in fnr_by_type[sketch_type]],
+                 label=sketch_type)
+    # plotting average MSE for each sketch
+    plt.subplot(3, 2, 5)
+    plt.xlabel('Memory')
+    plt.xscale('log', base=2)
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(utils.kb_formatter))
     plt.yscale('log', base=10)
     plt.ylabel('MSE')
     for sketch_type in sketches_by_type.keys():
-        plt.plot(counter_values, [mse / number_of_trials for mse in mse_by_type[sketch_type]],
+        plt.plot(memory_values_bytes, [statistics.fmean(mse_list) for mse_list in mse_by_type[sketch_type]],
                  label=sketch_type)
-
-    plt.title(f'#trials={number_of_trials}', fontsize=10)
     # plt.suptitle(f'Top-{k}, zipf-a={zipf_a}', fontsize=18, y=0.98)
-    plt.suptitle(f'Top-{k}', fontsize=18, y=0.98)
-    plt.legend()
+    plt.suptitle(rf"CAIDA-{utils.caida_year}, $\theta$={1/utils.theta}", fontsize=18, y=0.98)
+    plt.figlegend([sketch_name for sketch_name in sketches_by_type.keys()], loc="lower right")
     plt.tight_layout()
-    plt.show()
+    plt.savefig(f'caida{utils.caida_year}_100m_th{utils.theta//1000}k_fcm-topk.png')
+    # plt.show(block=True)
